@@ -1,13 +1,25 @@
 import React from 'react';
 import './App.css';
-import { setup, assign } from 'xstate';
+import { setup, assign, fromPromise } from 'xstate';
 import { useMachine } from '@xstate/react';
+import { after } from 'node:test';
 
 const machine = setup({
+    guards: {
+    feedbackValid: ({ context }) => {
+      return context.feedback.trim().length > 0;
+    }
+  },
   actions: {
     setFeedbackText: assign({
       feedback: ({ event }) => event.value
-    })
+    }),
+  actors:{
+    sendFeedback:fromPromise(async () =>{
+      await new Promise((r)=>setTimeout(r,1000));
+      return {status:200};
+    }),
+  }
   }
 }).createMachine({
   id: 'feedbackFlow',
@@ -26,10 +38,37 @@ const machine = setup({
     form: {
       on: {
         back: { target: 'prompt' },
-        submit: { target: 'thanks' },
+        submit: {
+          guard: 'feedbackValid',
+          target: 'submitting'
+        }, 
         close: { target: 'closed' },
-        'feedback.change': { actions: 'setFeedbackText' }
+        'feedback.update':{
+          actions:assign(({event})=>{
+            return {
+              feedback:event.value
+            }
+          })
+        }
       }
+    },
+    submitting:{
+        invoke:{
+          src:'sendFeedback',
+          onDone:{
+            target:'thanks'
+          },
+          
+        },
+        after:{
+            2000:{
+              target:'error'
+            }
+        }
+       
+    },
+    error:{
+
     },
     thanks: {
       on: {
@@ -40,6 +79,9 @@ const machine = setup({
       on: {
         restart: { target: 'prompt' }
       }
+    },
+    sendFeedback:{
+      
     }
   }
 });
@@ -94,6 +136,16 @@ function Form() {
           </div>
         </div>
       )}
+     
+      {state.matches('error') && (
+        <div>
+         <div className="flex justify-center items-center min-h-screen bg-gray-100">
+          <div className="p-4 border border-gray-300 rounded-md w-64 bg-white shadow-md text-center">
+            <h1 className="text-lg font-semibold mb-3">Something went wrong...</h1>
+          </div>
+        </div>
+        </div>
+      )}
 
       {state.matches('form') && (
         <div className="flex justify-center items-center min-h-screen bg-gray-100">
@@ -105,7 +157,7 @@ function Form() {
               placeholder="Your feedback..."
               value={state.context.feedback}
               onChange={(e) =>
-                send({ type: 'feedback.change', value: e.target.value })
+                send({ type: 'feedback.update', value: e.target.value })
               }
             />
 
@@ -132,6 +184,7 @@ function Form() {
               Close
             </button>
           </div>
+          <p>{state.context.feedback}</p>
         </div>
       )}
 
@@ -148,6 +201,7 @@ function Form() {
           </div>
         </div>
       )}
+      
     </div>
   );
 }
